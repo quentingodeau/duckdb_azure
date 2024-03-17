@@ -127,8 +127,9 @@ vector<string> AzureDfsStorageFileSystem::Glob(const string &path, FileOpener *o
 	}
 
 	// The path contains wildcard try to list file with the minimum calls
-	auto dfs_storage_service = ConnectToDfsStorageAccount(opener, path, azure_url);
-	auto dfs_filesystem_client = dfs_storage_service.GetFileSystemClient(azure_url.container);
+	auto storage_context = GetOrCreateStorageContext(opener, path, azure_url);
+	auto dfs_filesystem_client =
+	    storage_context->As<AzureDfsContextState>().GetDfsFileSystemClient(azure_url.container);
 
 	auto index_root_dir = azure_url.path.rfind('/', first_wildcard_pos);
 	if (index_root_dir == string::npos) {
