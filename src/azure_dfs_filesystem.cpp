@@ -1,8 +1,11 @@
 #include "azure_dfs_filesystem.hpp"
+#include "azure_parsed_url.hpp"
 #include "azure_storage_account_client.hpp"
 #include "duckdb/common/exception.hpp"
+#include "duckdb/common/file_system.hpp"
 #include "duckdb/function/scalar/string_functions.hpp"
 #include <algorithm>
+#include <azure/core/io/body_stream.hpp>
 #include <azure/storage/blobs/blob_options.hpp>
 #include <azure/storage/common/storage_exception.hpp>
 #include <azure/storage/files/datalake/datalake_file_system_client.hpp>
@@ -11,6 +14,7 @@
 #include <azure/storage/files/datalake/datalake_options.hpp>
 #include <azure/storage/files/datalake/datalake_responses.hpp>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <utility>
 #include <vector>
@@ -101,18 +105,25 @@ unique_ptr<AzureFileHandle> AzureDfsStorageFileSystem::CreateHandle(const string
 
 	auto parsed_url = ParseUrl(path);
 	auto storage_context = GetOrCreateStorageContext(opener, path, parsed_url);
-	auto file_system_client = storage_context->As<AzureDfsContextState>().GetDfsFileSystemClient(parsed_url.container);
 
 	auto handle = make_uniq<AzureDfsStorageFileHandle>(*this, path, flags, storage_context->read_options,
-	                                                   file_system_client.GetFileClient(parsed_url.path));
+	                                                   CreateFileClient(opener, path, parsed_url));
 	handle->PostConstruct();
 	return std::move(handle);
+}
+
+Azure::Storage::Files::DataLake::DataLakeFileClient
+AzureDfsStorageFileSystem::CreateFileClient(FileOpener *opener, const string &path, const AzureParsedUrl &parsed_url) {
+	auto storage_context = GetOrCreateStorageContext(opener, path, parsed_url);
+	auto file_system_client = storage_context->As<AzureDfsContextState>().GetDfsFileSystemClient(parsed_url.container);
+	return file_system_client.GetFileClient(parsed_url.path);
 }
 
 bool AzureDfsStorageFileSystem::CanHandleFile(const string &fpath) {
 	return IsDfsScheme(fpath);
 }
 
+// Read operation
 vector<string> AzureDfsStorageFileSystem::Glob(const string &path, FileOpener *opener) {
 	if (opener == nullptr) {
 		throw InternalException("Cannot do Azure storage Glob without FileOpener");
@@ -168,25 +179,153 @@ void AzureDfsStorageFileSystem::LoadRemoteFileInfo(AzureFileHandle &handle) {
 
 void AzureDfsStorageFileSystem::ReadRange(AzureFileHandle &handle, idx_t file_offset, char *buffer_out,
                                           idx_t buffer_out_len) {
+	using Azure::Core::Http::HttpRange;
+	using Azure::Storage::StorageException;
+	using Azure::Storage::Files::DataLake::DownloadFileToOptions;
+
 	auto &afh = handle.Cast<AzureDfsStorageFileHandle>();
 	try {
 		// Specify the range
-		Azure::Core::Http::HttpRange range;
+		HttpRange range;
 		range.Offset = (int64_t)file_offset;
 		range.Length = buffer_out_len;
-		Azure::Storage::Files::DataLake::DownloadFileToOptions options;
+		DownloadFileToOptions options;
 		options.Range = range;
 		options.TransferOptions.Concurrency = afh.read_options.transfer_concurrency;
 		options.TransferOptions.InitialChunkSize = afh.read_options.transfer_chunk_size;
 		options.TransferOptions.ChunkSize = afh.read_options.transfer_chunk_size;
 		auto res = afh.file_client.DownloadTo((uint8_t *)buffer_out, buffer_out_len, options);
 
-	} catch (const Azure::Storage::StorageException &e) {
+	} catch (const StorageException &e) {
 		throw IOException("AzureBlobStorageFileSystem Read to '%s' failed with %s Reason Phrase: %s", afh.path,
 		                  e.ErrorCode, e.ReasonPhrase);
 	}
 }
 
+bool AzureDfsStorageFileSystem::FileExists(const string &filename, FileOpener *opener) {
+	auto parsed_url = ParseUrl(filename);
+	auto file_client = CreateFileClient(opener, filename, parsed_url);
+
+	try {
+		auto properties = file_client.GetProperties();
+		return !properties.Value.IsDirectory;
+	} catch (const Azure::Storage::StorageException &e) {
+		if (e.StatusCode == Azure::Core::Http::HttpStatusCode::NotFound) {
+			return false;
+		} else {
+			throw IOException(
+			    "%s Failed to check if file exits '%s' failed with code'%s', Reason Phrase: '%s', Message: '%s'",
+			    GetName(), filename, e.ErrorCode, e.ReasonPhrase, e.Message);
+		}
+	}
+}
+
+bool AzureDfsStorageFileSystem::DirectoryExists(const string &directory, FileOpener *opener) {
+	auto parsed_url = ParseUrl(directory);
+	auto file_client = CreateFileClient(opener, directory, parsed_url);
+
+	try {
+		auto properties = file_client.GetProperties();
+		return properties.Value.IsDirectory;
+	} catch (const Azure::Storage::StorageException &e) {
+		if (e.StatusCode == Azure::Core::Http::HttpStatusCode::NotFound) {
+			return false;
+		} else {
+			throw IOException(
+			    "%s Failed to check if directory exits '%s' failed with code'%s', Reason Phrase: '%s', Message: '%s'",
+			    GetName(), directory, e.ErrorCode, e.ReasonPhrase, e.Message);
+		}
+	}
+}
+
+// Write operation
+void AzureDfsStorageFileSystem::Write(FileHandle &handle, void *buffer, int64_t nr_bytes, idx_t location) {
+	using Azure::Core::IO::MemoryBodyStream;
+	using Azure::Storage::Files::DataLake::AppendFileOptions;
+
+	auto &hfh = handle.Cast<AzureDfsStorageFileHandle>();
+	if (!(hfh.flags & FileFlags::FILE_FLAGS_WRITE)) {
+		throw InternalException("Write called on file not opened in write mode");
+	}
+
+	if (location != hfh.length) {
+		throw NotImplementedException("Non-sequential write not supported!");
+	}
+
+	MemoryBodyStream mbs(reinterpret_cast<const uint8_t *>(buffer), nr_bytes);
+	AppendFileOptions options;
+	options.Flush = false;
+	hfh.file_client.Append(mbs, location, options);
+	hfh.length += nr_bytes;
+}
+
+void AzureDfsStorageFileSystem::CreateDirectory(const string &directory, FileOpener *opener) {
+	auto parsed_url = ParseUrl(directory);
+	auto storage_context = GetOrCreateStorageContext(opener, directory, parsed_url);
+	auto file_system_client = storage_context->As<AzureDfsContextState>().GetDfsFileSystemClient(parsed_url.container);
+	auto directory_client = file_system_client.GetDirectoryClient(directory);
+	directory_client.CreateIfNotExists();
+}
+
+void AzureDfsStorageFileSystem::FileSync(FileHandle &handle) {
+	auto &hfh = handle.Cast<AzureDfsStorageFileHandle>();
+	if (!(hfh.flags & FileFlags::FILE_FLAGS_WRITE)) {
+		throw InternalException("Write called on file not opened in write mode");
+	}
+	auto response = hfh.file_client.Flush(hfh.length);
+	hfh.last_modified = ToTimeT(response.Value.LastModified);
+}
+
+void AzureDfsStorageFileSystem::RemoveFile(const string &filename, FileOpener *opener) {
+	auto parsed_url = ParseUrl(filename);
+	auto file_client = CreateFileClient(opener, filename, parsed_url);
+	file_client.DeleteIfExists();
+}
+
+void AzureDfsStorageFileSystem::RemoveDirectory(const string &directory, FileOpener *opener) {
+	auto parsed_url = ParseUrl(directory);
+	auto storage_context = GetOrCreateStorageContext(opener, directory, parsed_url);
+	auto file_system_client = storage_context->As<AzureDfsContextState>().GetDfsFileSystemClient(parsed_url.container);
+	auto directory_client = file_system_client.GetDirectoryClient(directory);
+	directory_client.DeleteRecursiveIfExists();
+}
+
+void AzureDfsStorageFileSystem::MoveFile(const string &source, const string &target, FileOpener *opener) {
+	auto source_url = ParseUrl(source);
+	auto target_url = ParseUrl(target);
+
+	if (source_url.container != target_url.container &&
+	    source_url.storage_account_name != target_url.storage_account_name) {
+		throw NotImplementedException("Cannot move files ('%s' => '%s') into a different container/storage account.",
+		                              source, target);
+	}
+
+	auto storage_context = GetOrCreateStorageContext(opener, source, source_url);
+	auto file_system_client = storage_context->As<AzureDfsContextState>().GetDfsFileSystemClient(source_url.container);
+	file_system_client.RenameFile(source_url.path, target_url.path);
+}
+
+void AzureDfsStorageFileSystem::CreateOrOverwrite(AzureFileHandle &handle) {
+	using Azure::Storage::Files::DataLake::UploadFileFromOptions;
+	auto &hfh = handle.Cast<AzureDfsStorageFileHandle>();
+
+	hfh.file_client.DeleteIfExists();
+	auto response = hfh.file_client.Create();
+
+	handle.length = 0;
+	handle.last_modified = ToTimeT(response.Value.LastModified);
+}
+
+void AzureDfsStorageFileSystem::CreateIfNotExists(AzureFileHandle &handle) {
+	auto &hfh = handle.Cast<AzureDfsStorageFileHandle>();
+
+	auto response = hfh.file_client.CreateIfNotExists();
+
+	handle.length = response.Value.FileSize.ValueOr(0);
+	handle.last_modified = ToTimeT(response.Value.LastModified);
+}
+
+// Other operation
 std::shared_ptr<AzureContextState> AzureDfsStorageFileSystem::CreateStorageContext(FileOpener *opener,
                                                                                    const string &path,
                                                                                    const AzureParsedUrl &parsed_url) {

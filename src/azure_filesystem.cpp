@@ -1,5 +1,6 @@
 #include "azure_filesystem.hpp"
 #include "duckdb/common/exception.hpp"
+#include "duckdb/common/file_system.hpp"
 #include "duckdb/common/types/value.hpp"
 #include "duckdb/main/client_context.hpp"
 #include <azure/storage/common/storage_exception.hpp>
@@ -33,34 +34,41 @@ AzureFileHandle::AzureFileHandle(AzureStorageFileSystem &fs, string path, uint8_
 }
 
 void AzureFileHandle::PostConstruct() {
-	static_cast<AzureStorageFileSystem &>(file_system).LoadFileInfo(*this);
+	auto &afs = static_cast<AzureStorageFileSystem &>(file_system);
+	if (flags & FileFlags::FILE_FLAGS_WRITE) {
+		if (flags & FileFlags::FILE_FLAGS_FILE_CREATE_NEW) {
+			afs.CreateOrOverwrite(*this);
+		} else if (flags & FileFlags::FILE_FLAGS_FILE_CREATE) {
+			afs.CreateIfNotExists(*this); // TODO see what has to be done if the file exists... Append or throw
+		} else if (flags & FileFlags::FILE_FLAGS_APPEND) {
+			// We expect the file to exists, just load it info
+			afs.LoadFileInfo(*this);
+		} else {
+			throw InternalException("No mode specified to write files easier Append or Create");
+		}
+	} else if (flags & FileFlags::FILE_FLAGS_READ) {
+		afs.LoadFileInfo(*this);
+	}
 }
 
 void AzureStorageFileSystem::LoadFileInfo(AzureFileHandle &handle) {
-	if (handle.flags & FileFlags::FILE_FLAGS_READ) {
-		try {
-			LoadRemoteFileInfo(handle);
-		} catch (const Azure::Storage::StorageException &e) {
-			throw IOException(
-			    "AzureBlobStorageFileSystem open file '%s' failed with code'%s', Reason Phrase: '%s', Message: '%s'",
-			    handle.path, e.ErrorCode, e.ReasonPhrase, e.Message);
-		} catch (const std::exception &e) {
-			throw IOException(
-			    "AzureBlobStorageFileSystem could not open file: '%s', unknown error occurred, this could mean "
-			    "the credentials used were wrong. Original error message: '%s' ",
-			    handle.path, e.what());
-		}
+	try {
+		LoadRemoteFileInfo(handle);
+	} catch (const Azure::Storage::StorageException &e) {
+		throw IOException(
+		    "AzureBlobStorageFileSystem open file '%s' failed with code'%s', Reason Phrase: '%s', Message: '%s'",
+		    handle.path, e.ErrorCode, e.ReasonPhrase, e.Message);
+	} catch (const std::exception &e) {
+		throw IOException(
+		    "AzureBlobStorageFileSystem could not open file: '%s', unknown error occurred, this could mean "
+		    "the credentials used were wrong. Original error message: '%s' ",
+		    handle.path, e.what());
 	}
 }
 
 unique_ptr<FileHandle> AzureStorageFileSystem::OpenFile(const string &path, uint8_t flags, FileLockType lock,
                                                         FileCompressionType compression, FileOpener *opener) {
 	D_ASSERT(compression == FileCompressionType::UNCOMPRESSED);
-
-	if (flags & FileFlags::FILE_FLAGS_WRITE) {
-		throw NotImplementedException("Writing to Azure containers is currently not supported");
-	}
-
 	auto handle = CreateHandle(path, flags, lock, compression, opener);
 	return std::move(handle);
 }
@@ -151,6 +159,12 @@ int64_t AzureStorageFileSystem::Read(FileHandle &handle, void *buffer, int64_t n
 	nr_bytes = MinValue<idx_t>(max_read, nr_bytes);
 	Read(handle, buffer, nr_bytes, hfh.file_offset);
 	return nr_bytes;
+}
+
+int64_t AzureStorageFileSystem::Write(FileHandle &handle, void *buffer, int64_t nr_bytes) {
+	auto &afh = handle.Cast<AzureFileHandle>();
+	Write(handle, buffer, nr_bytes, afh.length);
+	return afh.length;
 }
 
 std::shared_ptr<AzureContextState> AzureStorageFileSystem::GetOrCreateStorageContext(FileOpener *opener,

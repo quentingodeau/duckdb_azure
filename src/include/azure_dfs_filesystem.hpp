@@ -43,8 +43,18 @@ public:
 		return "AzureDfsStorageFileSystem";
 	}
 
-	// From AzureFilesystem
-	void LoadRemoteFileInfo(AzureFileHandle &handle) override;
+	void Write(FileHandle &handle, void *buffer, int64_t nr_bytes, idx_t location) override;
+	void CreateDirectory(const string &directory, FileOpener *opener = nullptr) override;
+	void FileSync(FileHandle &handle) override;
+	void MoveFile(const string &source, const string &target, FileOpener *opener = nullptr) override;
+
+	bool FileExists(const string &filename, FileOpener *opener = nullptr) override;
+	bool DirectoryExists(const string &directory, FileOpener *opener = nullptr) override;
+	void RemoveFile(const string &filename, FileOpener *opener = nullptr) override;
+	void RemoveDirectory(const string &directory, FileOpener *opener = nullptr) override;
+
+	void CreateOrOverwrite(AzureFileHandle &handle) override;
+	void CreateIfNotExists(AzureFileHandle &handle) override;
 
 public:
 	static const string SCHEME;
@@ -59,7 +69,11 @@ protected:
 	                                                        const AzureParsedUrl &parsed_url) override;
 	duckdb::unique_ptr<AzureFileHandle> CreateHandle(const string &path, uint8_t flags, FileLockType lock,
 	                                                 FileCompressionType compression, FileOpener *opener) override;
+	Azure::Storage::Files::DataLake::DataLakeFileClient CreateFileClient(FileOpener *opener, const string &path,
+	                                                                     const AzureParsedUrl &parsed_url);
 
+	// From AzureFilesystem
+	void LoadRemoteFileInfo(AzureFileHandle &handle) override;
 	void ReadRange(AzureFileHandle &handle, idx_t file_offset, char *buffer_out, idx_t buffer_out_len) override;
 };
 

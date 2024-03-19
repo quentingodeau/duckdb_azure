@@ -36,14 +36,17 @@ public:
 	vector<string> Glob(const string &path, FileOpener *opener = nullptr) override;
 
 	// FS methods
-	bool FileExists(const string &filename) override;
+	bool FileExists(const string &filename, FileOpener *opener = nullptr) override;
 	bool CanHandleFile(const string &fpath) override;
 	string GetName() const override {
 		return "AzureBlobStorageFileSystem";
 	}
 
-	// From AzureFilesystem
-	void LoadRemoteFileInfo(AzureFileHandle &handle) override;
+	void Write(FileHandle &handle, void *buffer, int64_t nr_bytes, idx_t location) override;
+	void FileSync(FileHandle &handle) override;
+
+	void CreateOrOverwrite(AzureFileHandle &handle) override;
+	void CreateIfNotExists(AzureFileHandle &handle) override;
 
 public:
 	static const string SCHEME;
@@ -62,6 +65,8 @@ protected:
 	duckdb::unique_ptr<AzureFileHandle> CreateHandle(const string &path, uint8_t flags, FileLockType lock,
 	                                                 FileCompressionType compression, FileOpener *opener) override;
 
+	// From AzureFilesystem
+	void LoadRemoteFileInfo(AzureFileHandle &handle) override;
 	void ReadRange(AzureFileHandle &handle, idx_t file_offset, char *buffer_out, idx_t buffer_out_len) override;
 };
 

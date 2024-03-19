@@ -6,8 +6,10 @@
 #include "duckdb/common/file_system.hpp"
 #include "duckdb/main/client_context_state.hpp"
 #include <azure/core/datetime.hpp>
+#include <azure/core/etag.hpp>
 #include <ctime>
 #include <cstdint>
+#include <string>
 
 namespace duckdb {
 
@@ -63,6 +65,7 @@ public:
 
 	// Read buffer
 	duckdb::unique_ptr<data_t[]> read_buffer;
+
 	// Read info
 	idx_t buffer_available;
 	idx_t buffer_idx;
@@ -82,6 +85,10 @@ public:
 
 	void Read(FileHandle &handle, void *buffer, int64_t nr_bytes, idx_t location) override;
 	int64_t Read(FileHandle &handle, void *buffer, int64_t nr_bytes) override;
+
+	void Write(FileHandle &handle, void *buffer, int64_t nr_bytes, idx_t location) override = 0;
+	int64_t Write(FileHandle &handle, void *buffer, int64_t nr_bytes) override;
+
 	bool CanSeek() override {
 		return true;
 	}
@@ -97,6 +104,8 @@ public:
 	void FileSync(FileHandle &handle) override;
 
 	void LoadFileInfo(AzureFileHandle &handle);
+	virtual void CreateOrOverwrite(AzureFileHandle &handle) = 0;
+	virtual void CreateIfNotExists(AzureFileHandle &handle) = 0;
 
 protected:
 	virtual duckdb::unique_ptr<AzureFileHandle> CreateHandle(const string &path, uint8_t flags, FileLockType lock,
@@ -110,6 +119,7 @@ protected:
 	                                                                const AzureParsedUrl &parsed_url) = 0;
 
 	virtual void LoadRemoteFileInfo(AzureFileHandle &handle) = 0;
+
 	static AzureReadOptions ParseAzureReadOptions(FileOpener *opener);
 	static time_t ToTimeT(const Azure::DateTime &dt);
 };

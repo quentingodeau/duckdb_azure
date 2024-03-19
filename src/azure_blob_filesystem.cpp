@@ -1,5 +1,6 @@
 #include "azure_blob_filesystem.hpp"
 
+#include "azure_parsed_url.hpp"
 #include "azure_storage_account_client.hpp"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
@@ -14,6 +15,7 @@
 #include "duckdb/main/client_data.hpp"
 #include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include <azure/storage/blobs.hpp>
+#include <azure/storage/common/storage_exception.hpp>
 #include <chrono>
 #include <cstdlib>
 #include <memory>
@@ -167,17 +169,25 @@ void AzureBlobStorageFileSystem::LoadRemoteFileInfo(AzureFileHandle &handle) {
 	hfh.last_modified = ToTimeT(res.Value.LastModified);
 }
 
-bool AzureBlobStorageFileSystem::FileExists(const string &filename) {
+bool AzureBlobStorageFileSystem::FileExists(const string &filename, FileOpener *opener) {
+	// Do not use open file here because it might Actually
+	auto parsed_url = ParseUrl(filename);
+	auto container_client = GetOrCreateStorageContext(opener, filename, parsed_url)
+	                            ->As<AzureBlobContextState>()
+	                            .GetBlobContainerClient(parsed_url.container);
 	try {
-		auto handle = OpenFile(filename, FileFlags::FILE_FLAGS_READ);
-		auto &sfh = handle->Cast<AzureBlobStorageFileHandle>();
-		if (sfh.length == 0) {
-			return false;
-		}
+		auto blob_client = container_client.GetBlobClient(parsed_url.path);
+		blob_client.GetProperties();
 		return true;
-	} catch (...) {
-		return false;
-	};
+	} catch (const Azure::Storage::StorageException &e) {
+		if (e.StatusCode == Azure::Core::Http::HttpStatusCode::NotFound) {
+			return false;
+		} else {
+			throw IOException(
+			    "%s Failed to check if file exits '%s' failed with code'%s', Reason Phrase: '%s', Message: '%s'",
+			    GetName(), filename, e.ErrorCode, e.ReasonPhrase, e.Message);
+		}
+	}
 }
 
 void AzureBlobStorageFileSystem::ReadRange(AzureFileHandle &handle, idx_t file_offset, char *buffer_out,
@@ -200,6 +210,22 @@ void AzureBlobStorageFileSystem::ReadRange(AzureFileHandle &handle, idx_t file_o
 		throw IOException("AzureBlobStorageFileSystem Read to '%s' failed with %s Reason Phrase: %s", afh.path,
 		                  e.ErrorCode, e.ReasonPhrase);
 	}
+}
+
+void AzureBlobStorageFileSystem::Write(FileHandle &handle, void *buffer, int64_t nr_bytes, idx_t location) {
+	// TODO implement!!
+}
+
+void AzureBlobStorageFileSystem::FileSync(FileHandle &handle) {
+	// TODO implement!!
+}
+
+void AzureBlobStorageFileSystem::CreateOrOverwrite(AzureFileHandle &handle) {
+	// TODO implement!!
+}
+
+void AzureBlobStorageFileSystem::CreateIfNotExists(AzureFileHandle &handle) {
+	// TODO implement!!
 }
 
 std::shared_ptr<AzureContextState> AzureBlobStorageFileSystem::CreateStorageContext(FileOpener *opener,
