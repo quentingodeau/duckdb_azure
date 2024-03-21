@@ -98,6 +98,10 @@ public:
 
 	void LoadFileInfo(AzureFileHandle &handle);
 
+	string PathSeparator(const string &path) final {
+		return "/";
+	}
+
 protected:
 	virtual duckdb::unique_ptr<AzureFileHandle> CreateHandle(const string &path, uint8_t flags, FileLockType lock,
 	                                                         FileCompressionType compression, FileOpener *opener) = 0;
