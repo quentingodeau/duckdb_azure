@@ -18,7 +18,8 @@ set(EXTENSION_SOURCES
     src/azure_blob_filesystem.cpp
     src/azure_dfs_filesystem.cpp
     src/http_state_policy.cpp
-    src/azure_parsed_url.cpp)
+    src/azure_parsed_url.cpp
+    src/azure_http_agent_policy.cpp)
 add_library(${EXTENSION_NAME} STATIC ${EXTENSION_SOURCES})
 
 set(PARAMETERS "-warnings")

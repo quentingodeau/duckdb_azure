@@ -1,6 +1,7 @@
 #pragma once
 
 #include "azure_parsed_url.hpp"
+#include "azure_client_config.hpp"
 #include "duckdb/common/assert.hpp"
 #include "duckdb/common/file_opener.hpp"
 #include "duckdb/common/file_system.hpp"
@@ -111,7 +112,8 @@ protected:
 	std::shared_ptr<AzureContextState> GetOrCreateStorageContext(FileOpener *opener, const string &path,
 	                                                             const AzureParsedUrl &parsed_url);
 	virtual std::shared_ptr<AzureContextState> CreateStorageContext(FileOpener *opener, const string &path,
-	                                                                const AzureParsedUrl &parsed_url) = 0;
+	                                                                const AzureParsedUrl &parsed_url,
+	                                                                const AzureClientConfig &config) = 0;
 
 	virtual void LoadRemoteFileInfo(AzureFileHandle &handle) = 0;
 	static AzureReadOptions ParseAzureReadOptions(FileOpener *opener);

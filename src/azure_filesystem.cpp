@@ -2,6 +2,7 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/types/value.hpp"
 #include "duckdb/main/client_context.hpp"
+#include "duckdb/main/config.hpp"
 #include <azure/storage/common/storage_exception.hpp>
 
 namespace duckdb {
@@ -161,17 +162,18 @@ std::shared_ptr<AzureContextState> AzureStorageFileSystem::GetOrCreateStorageCon
 	if (FileOpener::TryGetCurrentSetting(opener, "azure_context_caching", value)) {
 		azure_context_caching = value.GetValue<bool>();
 	}
+	auto *client_context = FileOpener::TryGetClientContext(opener);
+	const auto &db_config = DBConfig::GetConfig(*client_context);
+	AzureClientConfig config {db_config.UserAgent()};
 
 	std::shared_ptr<AzureContextState> result;
 	if (azure_context_caching) {
-		auto *client_context = FileOpener::TryGetClientContext(opener);
-
 		auto context_key = GetContextPrefix() + parsed_url.storage_account_name;
 
 		auto &registered_state = client_context->registered_state;
 		auto storage_account_it = registered_state.find(context_key);
 		if (storage_account_it == registered_state.end()) {
-			result = CreateStorageContext(opener, path, parsed_url);
+			result = CreateStorageContext(opener, path, parsed_url, config);
 			registered_state.insert(std::make_pair(context_key, result));
 		} else {
 			auto *azure_context_state = static_cast<AzureContextState *>(storage_account_it->second.get());
@@ -179,14 +181,14 @@ std::shared_ptr<AzureContextState> AzureStorageFileSystem::GetOrCreateStorageCon
 			// we do so because between queries the user can change the secret/variable that has been set
 			// the side effect of that is that we will reconnect (potentially retrieve a new token) on each request
 			if (!azure_context_state->IsValid()) {
-				result = CreateStorageContext(opener, path, parsed_url);
+				result = CreateStorageContext(opener, path, parsed_url, config);
 				registered_state[context_key] = result;
 			} else {
 				result = std::shared_ptr<AzureContextState>(storage_account_it->second, azure_context_state);
 			}
 		}
 	} else {
-		result = CreateStorageContext(opener, path, parsed_url);
+		result = CreateStorageContext(opener, path, parsed_url, config);
 	}
 
 	return result;

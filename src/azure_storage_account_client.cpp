@@ -1,5 +1,7 @@
 #include "azure_storage_account_client.hpp"
 
+#include "azure_client_config.hpp"
+#include "azure_http_agent_policy.hpp"
 #include "duckdb/catalog/catalog_transaction.hpp"
 #include "duckdb/common/enums/statement_type.hpp"
 #include "duckdb/common/exception.hpp"
@@ -75,7 +77,7 @@ static std::string AccountUrl(const AzureParsedUrl &azure_parsed_url) {
 
 template <typename T>
 static T ToClientOptions(const Azure::Core::Http::Policies::TransportOptions &transport_options,
-                         std::shared_ptr<HTTPState> http_state) {
+                         std::shared_ptr<HTTPState> http_state, const AzureClientConfig &config) {
 	static_assert(std::is_base_of<Azure::Core::_internal::ClientOptions, T>::value,
 	              "type parameter must be an Azure ClientOptions");
 	T options;
@@ -87,20 +89,23 @@ static T ToClientOptions(const Azure::Core::Http::Policies::TransportOptions &tr
 		// increase the input/output but will not be displayed in the EXPLAIN summary.
 		options.PerOperationPolicies.emplace_back(new HttpStatePolicy(std::move(http_state)));
 	}
+	if (!config.user_agent.empty()) {
+		options.PerOperationPolicies.emplace_back(new UserAgentPolicy(config.user_agent));
+	}
 	return options;
 }
 
 static Azure::Storage::Blobs::BlobClientOptions
 ToBlobClientOptions(const Azure::Core::Http::Policies::TransportOptions &transport_options,
-                    std::shared_ptr<HTTPState> http_state) {
-	return ToClientOptions<Azure::Storage::Blobs::BlobClientOptions>(transport_options, std::move(http_state));
+                    std::shared_ptr<HTTPState> http_state, const AzureClientConfig &config) {
+	return ToClientOptions<Azure::Storage::Blobs::BlobClientOptions>(transport_options, std::move(http_state), config);
 }
 
 static Azure::Storage::Files::DataLake::DataLakeClientOptions
 ToDfsClientOptions(const Azure::Core::Http::Policies::TransportOptions &transport_options,
-                   std::shared_ptr<HTTPState> http_state) {
+                   std::shared_ptr<HTTPState> http_state, const AzureClientConfig &config) {
 	return ToClientOptions<Azure::Storage::Files::DataLake::DataLakeClientOptions>(transport_options,
-	                                                                               std::move(http_state));
+	                                                                               std::move(http_state), config);
 }
 
 static Azure::Core::Credentials::TokenCredentialOptions
@@ -303,8 +308,9 @@ static Azure::Core::Http::Policies::TransportOptions GetTransportOptions(FileOpe
 
 static Azure::Storage::Blobs::BlobServiceClient
 GetBlobStorageAccountClientFromConfigProvider(FileOpener *opener, const KeyValueSecret &secret,
-                                              const AzureParsedUrl &azure_parsed_url) {
+                                              const AzureParsedUrl &azure_parsed_url, const AzureClientConfig &config) {
 	auto transport_options = GetTransportOptions(opener, secret);
+	auto blob_options = ToBlobClientOptions(transport_options, GetHttpState(opener), config);
 
 	// If connection string, we're done heres
 	auto connection_string_val = secret.TryGetValue("connection_string");
@@ -316,21 +322,20 @@ GetBlobStorageAccountClientFromConfigProvider(FileOpener *opener, const KeyValue
 			                            azure_parsed_url.storage_account_name);
 		}
 
-		auto blob_options = ToBlobClientOptions(transport_options, GetHttpState(opener));
 		return Azure::Storage::Blobs::BlobServiceClient::CreateFromConnectionString(connection_string, blob_options);
 	}
 
 	// Default provider (config) with no connection string => public storage account
 	auto account_url =
 	    azure_parsed_url.is_fully_qualified ? AccountUrl(azure_parsed_url) : AccountUrl(secret, DEFAULT_BLOB_ENDPOINT);
-	auto blob_options = ToBlobClientOptions(transport_options, GetHttpState(opener));
 	return Azure::Storage::Blobs::BlobServiceClient(account_url, blob_options);
 }
 
 static Azure::Storage::Files::DataLake::DataLakeServiceClient
 GetDfsStorageAccountClientFromConfigProvider(FileOpener *opener, const KeyValueSecret &secret,
-                                             const AzureParsedUrl &azure_parsed_url) {
+                                             const AzureParsedUrl &azure_parsed_url, const AzureClientConfig &config) {
 	auto transport_options = GetTransportOptions(opener, secret);
+	auto dfs_options = ToDfsClientOptions(transport_options, GetHttpState(opener), config);
 
 	// If connection string, we're done heres
 	auto connection_string_val = secret.TryGetValue("connection_string");
@@ -342,7 +347,6 @@ GetDfsStorageAccountClientFromConfigProvider(FileOpener *opener, const KeyValueS
 			                            azure_parsed_url.storage_account_name);
 		}
 
-		auto dfs_options = ToDfsClientOptions(transport_options, GetHttpState(opener));
 		return Azure::Storage::Files::DataLake::DataLakeServiceClient::CreateFromConnectionString(connection_string,
 		                                                                                          dfs_options);
 	}
@@ -350,13 +354,13 @@ GetDfsStorageAccountClientFromConfigProvider(FileOpener *opener, const KeyValueS
 	// Default provider (config) with no connection string => public storage account
 	auto account_url =
 	    azure_parsed_url.is_fully_qualified ? AccountUrl(azure_parsed_url) : AccountUrl(secret, DEFAULT_DFS_ENDPOINT);
-	auto dfs_options = ToDfsClientOptions(transport_options, GetHttpState(opener));
 	return Azure::Storage::Files::DataLake::DataLakeServiceClient(account_url, dfs_options);
 }
 
 static Azure::Storage::Blobs::BlobServiceClient
 GetBlobStorageAccountClientFromCredentialChainProvider(FileOpener *opener, const KeyValueSecret &secret,
-                                                       const AzureParsedUrl &azure_parsed_url) {
+                                                       const AzureParsedUrl &azure_parsed_url,
+                                                       const AzureClientConfig &config) {
 	auto transport_options = GetTransportOptions(opener, secret);
 	// Create credential chain
 	auto credential = CreateChainedTokenCredential(secret, transport_options);
@@ -364,13 +368,14 @@ GetBlobStorageAccountClientFromCredentialChainProvider(FileOpener *opener, const
 	// Connect to storage account
 	auto account_url =
 	    azure_parsed_url.is_fully_qualified ? AccountUrl(azure_parsed_url) : AccountUrl(secret, DEFAULT_BLOB_ENDPOINT);
-	auto blob_options = ToBlobClientOptions(transport_options, GetHttpState(opener));
+	auto blob_options = ToBlobClientOptions(transport_options, GetHttpState(opener), config);
 	return Azure::Storage::Blobs::BlobServiceClient(account_url, std::move(credential), blob_options);
 }
 
 static Azure::Storage::Files::DataLake::DataLakeServiceClient
 GetDfsStorageAccountClientFromCredentialChainProvider(FileOpener *opener, const KeyValueSecret &secret,
-                                                      const AzureParsedUrl &azure_parsed_url) {
+                                                      const AzureParsedUrl &azure_parsed_url,
+                                                      const AzureClientConfig &config) {
 	auto transport_options = GetTransportOptions(opener, secret);
 	// Create credential chain
 	auto credential = CreateChainedTokenCredential(secret, transport_options);
@@ -378,61 +383,66 @@ GetDfsStorageAccountClientFromCredentialChainProvider(FileOpener *opener, const 
 	// Connect to storage account
 	auto account_url =
 	    azure_parsed_url.is_fully_qualified ? AccountUrl(azure_parsed_url) : AccountUrl(secret, DEFAULT_DFS_ENDPOINT);
-	auto dfs_options = ToDfsClientOptions(transport_options, GetHttpState(opener));
+	auto dfs_options = ToDfsClientOptions(transport_options, GetHttpState(opener), config);
 	return Azure::Storage::Files::DataLake::DataLakeServiceClient(account_url, std::move(credential), dfs_options);
 }
 
 static Azure::Storage::Blobs::BlobServiceClient
 GetBlobStorageAccountClientFromServicePrincipalProvider(FileOpener *opener, const KeyValueSecret &secret,
-                                                        const AzureParsedUrl &azure_parsed_url) {
+                                                        const AzureParsedUrl &azure_parsed_url,
+                                                        const AzureClientConfig &config) {
 	auto transport_options = GetTransportOptions(opener, secret);
 	auto token_credential = CreateClientCredential(secret, transport_options);
 
 	auto account_url =
 	    azure_parsed_url.is_fully_qualified ? AccountUrl(azure_parsed_url) : AccountUrl(secret, DEFAULT_BLOB_ENDPOINT);
-	;
-	auto blob_options = ToBlobClientOptions(transport_options, GetHttpState(opener));
+
+	auto blob_options = ToBlobClientOptions(transport_options, GetHttpState(opener), config);
 	return Azure::Storage::Blobs::BlobServiceClient(account_url, token_credential, blob_options);
 }
 
 static Azure::Storage::Files::DataLake::DataLakeServiceClient
 GetDfsStorageAccountClientFromServicePrincipalProvider(FileOpener *opener, const KeyValueSecret &secret,
-                                                       const AzureParsedUrl &azure_parsed_url) {
+                                                       const AzureParsedUrl &azure_parsed_url,
+                                                       const AzureClientConfig &config) {
 	auto transport_options = GetTransportOptions(opener, secret);
 	auto token_credential = CreateClientCredential(secret, transport_options);
 
 	auto account_url =
 	    azure_parsed_url.is_fully_qualified ? AccountUrl(azure_parsed_url) : AccountUrl(secret, DEFAULT_DFS_ENDPOINT);
 	;
-	auto dfs_options = ToDfsClientOptions(transport_options, GetHttpState(opener));
+	auto dfs_options = ToDfsClientOptions(transport_options, GetHttpState(opener), config);
 	return Azure::Storage::Files::DataLake::DataLakeServiceClient(account_url, token_credential, dfs_options);
 }
 
-static Azure::Storage::Blobs::BlobServiceClient
-GetBlobStorageAccountClient(FileOpener *opener, const KeyValueSecret &secret, const AzureParsedUrl &azure_parsed_url) {
+static Azure::Storage::Blobs::BlobServiceClient GetBlobStorageAccountClient(FileOpener *opener,
+                                                                            const KeyValueSecret &secret,
+                                                                            const AzureParsedUrl &azure_parsed_url,
+                                                                            const AzureClientConfig &config) {
 	auto &provider = secret.GetProvider();
 	// default provider
 	if (provider == "config") {
-		return GetBlobStorageAccountClientFromConfigProvider(opener, secret, azure_parsed_url);
+		return GetBlobStorageAccountClientFromConfigProvider(opener, secret, azure_parsed_url, config);
 	} else if (provider == "credential_chain") {
-		return GetBlobStorageAccountClientFromCredentialChainProvider(opener, secret, azure_parsed_url);
+		return GetBlobStorageAccountClientFromCredentialChainProvider(opener, secret, azure_parsed_url, config);
 	} else if (provider == "service_principal") {
-		return GetBlobStorageAccountClientFromServicePrincipalProvider(opener, secret, azure_parsed_url);
+		return GetBlobStorageAccountClientFromServicePrincipalProvider(opener, secret, azure_parsed_url, config);
 	}
 
 	throw InvalidInputException("Unsupported provider type %s for azure", provider);
 }
 
 static Azure::Storage::Files::DataLake::DataLakeServiceClient
-GetDfsStorageAccountClient(FileOpener *opener, const KeyValueSecret &secret, const AzureParsedUrl &azure_parsed_url) {
+GetDfsStorageAccountClient(FileOpener *opener, const KeyValueSecret &secret, const AzureParsedUrl &azure_parsed_url,
+                           const AzureClientConfig &config) {
 	auto &provider = secret.GetProvider();
 	// default provider
 	if (provider == "config") {
-		return GetDfsStorageAccountClientFromConfigProvider(opener, secret, azure_parsed_url);
+		return GetDfsStorageAccountClientFromConfigProvider(opener, secret, azure_parsed_url, config);
 	} else if (provider == "credential_chain") {
-		return GetDfsStorageAccountClientFromCredentialChainProvider(opener, secret, azure_parsed_url);
+		return GetDfsStorageAccountClientFromCredentialChainProvider(opener, secret, azure_parsed_url, config);
 	} else if (provider == "service_principal") {
-		return GetDfsStorageAccountClientFromServicePrincipalProvider(opener, secret, azure_parsed_url);
+		return GetDfsStorageAccountClientFromServicePrincipalProvider(opener, secret, azure_parsed_url, config);
 	}
 
 	throw InvalidInputException("Unsupported provider type %s for azure", provider);
@@ -451,9 +461,10 @@ static Azure::Core::Http::Policies::TransportOptions GetTransportOptions(FileOpe
 
 static Azure::Storage::Blobs::BlobServiceClient GetBlobStorageAccountClient(FileOpener *opener,
                                                                             const std::string &provided_storage_account,
-                                                                            const std::string &provided_endpoint) {
+                                                                            const std::string &provided_endpoint,
+                                                                            const AzureClientConfig &config) {
 	auto transport_options = GetTransportOptions(opener);
-	auto blob_options = ToBlobClientOptions(transport_options, GetHttpState(opener));
+	auto blob_options = ToBlobClientOptions(transport_options, GetHttpState(opener), config);
 
 	auto connection_string = TryGetCurrentSetting(opener, "azure_storage_connection_string");
 	if (!connection_string.empty() &&
@@ -506,24 +517,29 @@ const SecretMatch LookupSecret(FileOpener *opener, const std::string &path) {
 }
 
 Azure::Storage::Blobs::BlobServiceClient ConnectToBlobStorageAccount(FileOpener *opener, const std::string &path,
-                                                                     const AzureParsedUrl &azure_parsed_url) {
+                                                                     const AzureParsedUrl &azure_parsed_url,
+                                                                     const AzureClientConfig &config) {
 
 	auto secret_match = LookupSecret(opener, path);
 	if (secret_match.HasMatch()) {
 		const auto &base_secret = secret_match.GetSecret();
-		return GetBlobStorageAccountClient(opener, dynamic_cast<const KeyValueSecret &>(base_secret), azure_parsed_url);
+		return GetBlobStorageAccountClient(opener, dynamic_cast<const KeyValueSecret &>(base_secret), azure_parsed_url,
+		                                   config);
 	}
 
 	// No secret found try to connect with variables
-	return GetBlobStorageAccountClient(opener, azure_parsed_url.storage_account_name, azure_parsed_url.endpoint);
+	return GetBlobStorageAccountClient(opener, azure_parsed_url.storage_account_name, azure_parsed_url.endpoint,
+	                                   config);
 }
 
 Azure::Storage::Files::DataLake::DataLakeServiceClient
-ConnectToDfsStorageAccount(FileOpener *opener, const std::string &path, const AzureParsedUrl &azure_parsed_url) {
+ConnectToDfsStorageAccount(FileOpener *opener, const std::string &path, const AzureParsedUrl &azure_parsed_url,
+                           const AzureClientConfig &config) {
 	auto secret_match = LookupSecret(opener, path);
 	if (secret_match.HasMatch()) {
 		const auto &base_secret = secret_match.GetSecret();
-		return GetDfsStorageAccountClient(opener, dynamic_cast<const KeyValueSecret &>(base_secret), azure_parsed_url);
+		return GetDfsStorageAccountClient(opener, dynamic_cast<const KeyValueSecret &>(base_secret), azure_parsed_url,
+		                                  config);
 	}
 
 	if (!azure_parsed_url.is_fully_qualified) {
@@ -536,7 +552,7 @@ ConnectToDfsStorageAccount(FileOpener *opener, const std::string &path, const Az
 	// No secret but FQDN has been provided, connect to a public storage account
 	auto transport_options = GetTransportOptions(opener);
 	auto account_url = "https://" + azure_parsed_url.storage_account_name + '.' + azure_parsed_url.endpoint;
-	auto dfs_options = ToDfsClientOptions(transport_options, GetHttpState(opener));
+	auto dfs_options = ToDfsClientOptions(transport_options, GetHttpState(opener), config);
 	return Azure::Storage::Files::DataLake::DataLakeServiceClient(account_url, dfs_options);
 }
 

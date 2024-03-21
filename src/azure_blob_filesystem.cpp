@@ -204,10 +204,11 @@ void AzureBlobStorageFileSystem::ReadRange(AzureFileHandle &handle, idx_t file_o
 
 std::shared_ptr<AzureContextState> AzureBlobStorageFileSystem::CreateStorageContext(FileOpener *opener,
                                                                                     const string &path,
-                                                                                    const AzureParsedUrl &parsed_url) {
+                                                                                    const AzureParsedUrl &parsed_url,
+                                                                                    const AzureClientConfig &config) {
 	auto azure_read_options = ParseAzureReadOptions(opener);
 
-	return std::make_shared<AzureBlobContextState>(ConnectToBlobStorageAccount(opener, path, parsed_url),
+	return std::make_shared<AzureBlobContextState>(ConnectToBlobStorageAccount(opener, path, parsed_url, config),
 	                                               azure_read_options);
 }
 

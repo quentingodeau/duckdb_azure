@@ -56,7 +56,8 @@ protected:
 		return PATH_PREFIX;
 	}
 	std::shared_ptr<AzureContextState> CreateStorageContext(FileOpener *opener, const string &path,
-	                                                        const AzureParsedUrl &parsed_url) override;
+	                                                        const AzureParsedUrl &parsed_url,
+	                                                        const AzureClientConfig &config) override;
 	duckdb::unique_ptr<AzureFileHandle> CreateHandle(const string &path, uint8_t flags, FileLockType lock,
 	                                                 FileCompressionType compression, FileOpener *opener) override;
 
