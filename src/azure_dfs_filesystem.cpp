@@ -87,21 +87,20 @@ AzureDfsContextState::GetDfsFileSystemClient(const std::string &file_system_name
 }
 
 //////// AzureDfsContextState ////////
-AzureDfsStorageFileHandle::AzureDfsStorageFileHandle(AzureDfsStorageFileSystem &fs, string path, uint8_t flags,
+AzureDfsStorageFileHandle::AzureDfsStorageFileHandle(AzureDfsStorageFileSystem &fs, string path, FileOpenFlags flags,
                                                      const AzureReadOptions &read_options,
                                                      Azure::Storage::Files::DataLake::DataLakeFileClient client)
     : AzureFileHandle(fs, std::move(path), flags, read_options), file_client(std::move(client)) {
 }
 
 //////// AzureDfsStorageFileSystem ////////
-unique_ptr<AzureFileHandle> AzureDfsStorageFileSystem::CreateHandle(const string &path, uint8_t flags,
-                                                                    FileLockType lock, FileCompressionType compression,
-                                                                    FileOpener *opener) {
+unique_ptr<AzureFileHandle> AzureDfsStorageFileSystem::CreateHandle(const string &path, FileOpenFlags flags,
+                                                                    optional_ptr<FileOpener> opener) {
 	if (opener == nullptr) {
 		throw InternalException("Cannot do Azure storage CreateHandle without FileOpener");
 	}
 
-	D_ASSERT(compression == FileCompressionType::UNCOMPRESSED);
+	D_ASSERT(flags.Compression() == FileCompressionType::UNCOMPRESSED);
 
 	auto parsed_url = ParseUrl(path);
 	auto storage_context = GetOrCreateStorageContext(opener, path, parsed_url);
@@ -113,7 +112,7 @@ unique_ptr<AzureFileHandle> AzureDfsStorageFileSystem::CreateHandle(const string
 }
 
 Azure::Storage::Files::DataLake::DataLakeFileClient
-AzureDfsStorageFileSystem::CreateFileClient(FileOpener *opener, const string &path, const AzureParsedUrl &parsed_url) {
+AzureDfsStorageFileSystem::CreateFileClient(optional_ptr<FileOpener> opener, const string &path, const AzureParsedUrl &parsed_url) {
 	auto storage_context = GetOrCreateStorageContext(opener, path, parsed_url);
 	auto file_system_client = storage_context->As<AzureDfsContextState>().GetDfsFileSystemClient(parsed_url.container);
 	return file_system_client.GetFileClient(parsed_url.path);
@@ -124,7 +123,7 @@ bool AzureDfsStorageFileSystem::CanHandleFile(const string &fpath) {
 }
 
 // Read operation
-vector<string> AzureDfsStorageFileSystem::Glob(const string &path, FileOpener *opener) {
+vector<string> AzureDfsStorageFileSystem::Glob(const string &path, FileOpener* opener) {
 	if (opener == nullptr) {
 		throw InternalException("Cannot do Azure storage Glob without FileOpener");
 	}
@@ -202,7 +201,7 @@ void AzureDfsStorageFileSystem::ReadRange(AzureFileHandle &handle, idx_t file_of
 	}
 }
 
-bool AzureDfsStorageFileSystem::FileExists(const string &filename, FileOpener *opener) {
+bool AzureDfsStorageFileSystem::FileExists(const string &filename, optional_ptr<FileOpener> opener) {
 	auto parsed_url = ParseUrl(filename);
 	auto file_client = CreateFileClient(opener, filename, parsed_url);
 
@@ -220,7 +219,7 @@ bool AzureDfsStorageFileSystem::FileExists(const string &filename, FileOpener *o
 	}
 }
 
-bool AzureDfsStorageFileSystem::DirectoryExists(const string &directory, FileOpener *opener) {
+bool AzureDfsStorageFileSystem::DirectoryExists(const string &directory, optional_ptr<FileOpener> opener) {
 	auto parsed_url = ParseUrl(directory);
 	auto file_client = CreateFileClient(opener, directory, parsed_url);
 
@@ -244,7 +243,7 @@ void AzureDfsStorageFileSystem::Write(FileHandle &handle, void *buffer, int64_t 
 	using Azure::Storage::Files::DataLake::AppendFileOptions;
 
 	auto &hfh = handle.Cast<AzureDfsStorageFileHandle>();
-	if (!(hfh.flags & FileFlags::FILE_FLAGS_WRITE)) {
+	if (!hfh.flags.OpenForWriting()) {
 		throw InternalException("Write called on file not opened in write mode");
 	}
 
@@ -259,7 +258,7 @@ void AzureDfsStorageFileSystem::Write(FileHandle &handle, void *buffer, int64_t 
 	hfh.length += nr_bytes;
 }
 
-void AzureDfsStorageFileSystem::CreateDirectory(const string &directory, FileOpener *opener) {
+void AzureDfsStorageFileSystem::CreateDirectory(const string &directory, optional_ptr<FileOpener> opener) {
 	auto parsed_url = ParseUrl(directory);
 	auto storage_context = GetOrCreateStorageContext(opener, directory, parsed_url);
 	auto file_system_client = storage_context->As<AzureDfsContextState>().GetDfsFileSystemClient(parsed_url.container);
@@ -269,20 +268,20 @@ void AzureDfsStorageFileSystem::CreateDirectory(const string &directory, FileOpe
 
 void AzureDfsStorageFileSystem::FileSync(FileHandle &handle) {
 	auto &hfh = handle.Cast<AzureDfsStorageFileHandle>();
-	if (!(hfh.flags & FileFlags::FILE_FLAGS_WRITE)) {
+	if (!hfh.flags.OpenForWriting()) {
 		throw InternalException("Write called on file not opened in write mode");
 	}
 	auto response = hfh.file_client.Flush(hfh.length);
 	hfh.last_modified = ToTimeT(response.Value.LastModified);
 }
 
-void AzureDfsStorageFileSystem::RemoveFile(const string &filename, FileOpener *opener) {
+void AzureDfsStorageFileSystem::RemoveFile(const string &filename, optional_ptr<FileOpener> opener) {
 	auto parsed_url = ParseUrl(filename);
 	auto file_client = CreateFileClient(opener, filename, parsed_url);
 	file_client.DeleteIfExists();
 }
 
-void AzureDfsStorageFileSystem::RemoveDirectory(const string &directory, FileOpener *opener) {
+void AzureDfsStorageFileSystem::RemoveDirectory(const string &directory, optional_ptr<FileOpener> opener) {
 	auto parsed_url = ParseUrl(directory);
 	auto storage_context = GetOrCreateStorageContext(opener, directory, parsed_url);
 	auto file_system_client = storage_context->As<AzureDfsContextState>().GetDfsFileSystemClient(parsed_url.container);
@@ -290,7 +289,7 @@ void AzureDfsStorageFileSystem::RemoveDirectory(const string &directory, FileOpe
 	directory_client.DeleteRecursiveIfExists();
 }
 
-void AzureDfsStorageFileSystem::MoveFile(const string &source, const string &target, FileOpener *opener) {
+void AzureDfsStorageFileSystem::MoveFile(const string &source, const string &target, optional_ptr<FileOpener> opener) {
 	auto source_url = ParseUrl(source);
 	auto target_url = ParseUrl(target);
 
@@ -326,7 +325,7 @@ void AzureDfsStorageFileSystem::CreateIfNotExists(AzureFileHandle &handle) {
 }
 
 // Other operation
-std::shared_ptr<AzureContextState> AzureDfsStorageFileSystem::CreateStorageContext(FileOpener *opener,
+std::shared_ptr<AzureContextState> AzureDfsStorageFileSystem::CreateStorageContext(optional_ptr<FileOpener> opener,
                                                                                    const string &path,
                                                                                    const AzureParsedUrl &parsed_url) {
 	auto azure_read_options = ParseAzureReadOptions(opener);

@@ -19,7 +19,7 @@ void AzureContextState::QueryEnd() {
 	is_valid = false;
 }
 
-AzureFileHandle::AzureFileHandle(AzureStorageFileSystem &fs, string path, uint8_t flags,
+AzureFileHandle::AzureFileHandle(AzureStorageFileSystem &fs, string path, FileOpenFlags flags,
                                  const AzureReadOptions &read_options)
     : FileHandle(fs, std::move(path)), flags(flags),
       // File info
@@ -28,25 +28,27 @@ AzureFileHandle::AzureFileHandle(AzureStorageFileSystem &fs, string path, uint8_
       buffer_available(0), buffer_idx(0), file_offset(0), buffer_start(0), buffer_end(0),
       // Options
       read_options(read_options) {
-	if (flags & FileFlags::FILE_FLAGS_READ) {
+	if (flags.OpenForReading()) {
 		read_buffer = duckdb::unique_ptr<data_t[]>(new data_t[read_options.buffer_size]);
 	}
 }
 
 void AzureFileHandle::PostConstruct() {
 	auto &afs = static_cast<AzureStorageFileSystem &>(file_system);
-	if (flags & FileFlags::FILE_FLAGS_WRITE) {
-		if (flags & FileFlags::FILE_FLAGS_FILE_CREATE_NEW) {
+	if (flags.OpenForWriting()) {
+		// TODO double check I think I missing the logic here!!
+		if (flags.OverwriteExistingFile()) {
 			afs.CreateOrOverwrite(*this);
-		} else if (flags & FileFlags::FILE_FLAGS_FILE_CREATE) {
+		} else if (flags.CreateFileIfNotExists()) {
 			afs.CreateIfNotExists(*this); // TODO see what has to be done if the file exists... Append or throw
-		} else if (flags & FileFlags::FILE_FLAGS_APPEND) {
+		} else if (flags.OpenForAppending()) {
 			// We expect the file to exists, just load it info
 			afs.LoadFileInfo(*this);
 		} else {
 			throw InternalException("No mode specified to write files easier Append or Create");
 		}
-	} else if (flags & FileFlags::FILE_FLAGS_READ) {
+	} else if (flags.OpenForReading()) {
+		// TODO File can be read and write double check again!!
 		afs.LoadFileInfo(*this);
 	}
 }
@@ -66,10 +68,9 @@ void AzureStorageFileSystem::LoadFileInfo(AzureFileHandle &handle) {
 	}
 }
 
-unique_ptr<FileHandle> AzureStorageFileSystem::OpenFile(const string &path, uint8_t flags, FileLockType lock,
-                                                        FileCompressionType compression, FileOpener *opener) {
-	D_ASSERT(compression == FileCompressionType::UNCOMPRESSED);
-	auto handle = CreateHandle(path, flags, lock, compression, opener);
+unique_ptr<FileHandle> AzureStorageFileSystem::OpenFile(const string &path, FileOpenFlags flags, optional_ptr<FileOpener> opener) {
+	D_ASSERT(flags.Compression() == FileCompressionType::UNCOMPRESSED);
+	auto handle = CreateHandle(path, flags, opener);
 	return std::move(handle);
 }
 
@@ -100,7 +101,7 @@ void AzureStorageFileSystem::Read(FileHandle &handle, void *buffer, int64_t nr_b
 	idx_t buffer_offset = 0;
 
 	// Don't buffer when DirectIO is set.
-	if (hfh.flags & FileFlags::FILE_FLAGS_DIRECT_IO && to_read > 0) {
+	if (hfh.flags.DirectIO() && to_read > 0) {
 		ReadRange(hfh, location, (char *)buffer, to_read);
 		hfh.buffer_available = 0;
 		hfh.buffer_idx = 0;
@@ -167,7 +168,7 @@ int64_t AzureStorageFileSystem::Write(FileHandle &handle, void *buffer, int64_t 
 	return afh.length;
 }
 
-std::shared_ptr<AzureContextState> AzureStorageFileSystem::GetOrCreateStorageContext(FileOpener *opener,
+std::shared_ptr<AzureContextState> AzureStorageFileSystem::GetOrCreateStorageContext(optional_ptr<FileOpener> opener,
                                                                                      const string &path,
                                                                                      const AzureParsedUrl &parsed_url) {
 	Value value;
@@ -178,7 +179,7 @@ std::shared_ptr<AzureContextState> AzureStorageFileSystem::GetOrCreateStorageCon
 
 	std::shared_ptr<AzureContextState> result;
 	if (azure_context_caching) {
-		auto *client_context = FileOpener::TryGetClientContext(opener);
+		auto client_context = FileOpener::TryGetClientContext(opener);
 
 		auto context_key = GetContextPrefix() + parsed_url.storage_account_name;
 
@@ -206,7 +207,7 @@ std::shared_ptr<AzureContextState> AzureStorageFileSystem::GetOrCreateStorageCon
 	return result;
 }
 
-AzureReadOptions AzureStorageFileSystem::ParseAzureReadOptions(FileOpener *opener) {
+AzureReadOptions AzureStorageFileSystem::ParseAzureReadOptions(optional_ptr<FileOpener> opener) {
 	AzureReadOptions options;
 
 	Value concurrency_val;

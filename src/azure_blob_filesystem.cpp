@@ -68,21 +68,20 @@ AzureBlobContextState::GetBlobContainerClient(const std::string &blobContainerNa
 }
 
 //////// AzureBlobStorageFileHandle ////////
-AzureBlobStorageFileHandle::AzureBlobStorageFileHandle(AzureBlobStorageFileSystem &fs, string path, uint8_t flags,
+AzureBlobStorageFileHandle::AzureBlobStorageFileHandle(AzureBlobStorageFileSystem &fs, string path, FileOpenFlags flags,
                                                        const AzureReadOptions &read_options,
                                                        Azure::Storage::Blobs::BlobClient blob_client)
     : AzureFileHandle(fs, std::move(path), flags, read_options), blob_client(std::move(blob_client)) {
 }
 
 //////// AzureBlobStorageFileSystem ////////
-unique_ptr<AzureFileHandle> AzureBlobStorageFileSystem::CreateHandle(const string &path, uint8_t flags,
-                                                                     FileLockType lock, FileCompressionType compression,
-                                                                     FileOpener *opener) {
-	if (opener == nullptr) {
+unique_ptr<AzureFileHandle> AzureBlobStorageFileSystem::CreateHandle(const string &path, FileOpenFlags flags,
+                                                                     optional_ptr<FileOpener> opener) {
+	if (!opener) {
 		throw InternalException("Cannot do Azure storage CreateHandle without FileOpener");
 	}
 
-	D_ASSERT(compression == FileCompressionType::UNCOMPRESSED);
+	D_ASSERT(flags.Compression() == FileCompressionType::UNCOMPRESSED);
 
 	auto parsed_url = ParseUrl(path);
 	auto storage_context = GetOrCreateStorageContext(opener, path, parsed_url);
@@ -99,7 +98,7 @@ bool AzureBlobStorageFileSystem::CanHandleFile(const string &fpath) {
 	return fpath.rfind(PATH_PREFIX, 0) * fpath.rfind(SHORT_PATH_PREFIX, 0) == 0;
 }
 
-vector<string> AzureBlobStorageFileSystem::Glob(const string &path, FileOpener *opener) {
+vector<string> AzureBlobStorageFileSystem::Glob(const string &path, FileOpener* opener) {
 	if (opener == nullptr) {
 		throw InternalException("Cannot do Azure storage Glob without FileOpener");
 	}
@@ -169,7 +168,7 @@ void AzureBlobStorageFileSystem::LoadRemoteFileInfo(AzureFileHandle &handle) {
 	hfh.last_modified = ToTimeT(res.Value.LastModified);
 }
 
-bool AzureBlobStorageFileSystem::FileExists(const string &filename, FileOpener *opener) {
+bool AzureBlobStorageFileSystem::FileExists(const string &filename, optional_ptr<FileOpener> opener) {
 	// Do not use open file here because it might Actually
 	auto parsed_url = ParseUrl(filename);
 	auto container_client = GetOrCreateStorageContext(opener, filename, parsed_url)
@@ -228,7 +227,7 @@ void AzureBlobStorageFileSystem::CreateIfNotExists(AzureFileHandle &handle) {
 	// TODO implement!!
 }
 
-std::shared_ptr<AzureContextState> AzureBlobStorageFileSystem::CreateStorageContext(FileOpener *opener,
+std::shared_ptr<AzureContextState> AzureBlobStorageFileSystem::CreateStorageContext(optional_ptr<FileOpener> opener,
                                                                                     const string &path,
                                                                                     const AzureParsedUrl &parsed_url) {
 	auto azure_read_options = ParseAzureReadOptions(opener);

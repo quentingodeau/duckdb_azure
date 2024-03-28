@@ -25,7 +25,7 @@ class AzureDfsStorageFileSystem;
 
 class AzureDfsStorageFileHandle : public AzureFileHandle {
 public:
-	AzureDfsStorageFileHandle(AzureDfsStorageFileSystem &fs, string path, uint8_t flags,
+	AzureDfsStorageFileHandle(AzureDfsStorageFileSystem &fs, string path, FileOpenFlags flags,
 	                          const AzureReadOptions &read_options,
 	                          Azure::Storage::Files::DataLake::DataLakeFileClient client);
 	~AzureDfsStorageFileHandle() override = default;
@@ -36,7 +36,7 @@ public:
 
 class AzureDfsStorageFileSystem : public AzureStorageFileSystem {
 public:
-	vector<string> Glob(const string &path, FileOpener *opener = nullptr) override;
+	vector<string> Glob(const string &path, FileOpener* opener = nullptr) override;
 
 	bool CanHandleFile(const string &fpath) override;
 	string GetName() const override {
@@ -44,14 +44,14 @@ public:
 	}
 
 	void Write(FileHandle &handle, void *buffer, int64_t nr_bytes, idx_t location) override;
-	void CreateDirectory(const string &directory, FileOpener *opener = nullptr) override;
+	void CreateDirectory(const string &directory, optional_ptr<FileOpener> opener = nullptr) override;
 	void FileSync(FileHandle &handle) override;
-	void MoveFile(const string &source, const string &target, FileOpener *opener = nullptr) override;
+	void MoveFile(const string &source, const string &target, optional_ptr<FileOpener> opener = nullptr) override;
 
-	bool FileExists(const string &filename, FileOpener *opener = nullptr) override;
-	bool DirectoryExists(const string &directory, FileOpener *opener = nullptr) override;
-	void RemoveFile(const string &filename, FileOpener *opener = nullptr) override;
-	void RemoveDirectory(const string &directory, FileOpener *opener = nullptr) override;
+	bool FileExists(const string &filename, optional_ptr<FileOpener> opener = nullptr) override;
+	bool DirectoryExists(const string &directory, optional_ptr<FileOpener> opener = nullptr) override;
+	void RemoveFile(const string &filename, optional_ptr<FileOpener> opener = nullptr) override;
+	void RemoveDirectory(const string &directory, optional_ptr<FileOpener> opener = nullptr) override;
 
 	void CreateOrOverwrite(AzureFileHandle &handle) override;
 	void CreateIfNotExists(AzureFileHandle &handle) override;
@@ -65,11 +65,10 @@ protected:
 	const string &GetContextPrefix() const override {
 		return PATH_PREFIX;
 	}
-	std::shared_ptr<AzureContextState> CreateStorageContext(FileOpener *opener, const string &path,
+	std::shared_ptr<AzureContextState> CreateStorageContext(optional_ptr<FileOpener> opener, const string &path,
 	                                                        const AzureParsedUrl &parsed_url) override;
-	duckdb::unique_ptr<AzureFileHandle> CreateHandle(const string &path, uint8_t flags, FileLockType lock,
-	                                                 FileCompressionType compression, FileOpener *opener) override;
-	Azure::Storage::Files::DataLake::DataLakeFileClient CreateFileClient(FileOpener *opener, const string &path,
+	duckdb::unique_ptr<AzureFileHandle> CreateHandle(const string &path, FileOpenFlags flags, optional_ptr<FileOpener> opener) override;
+	Azure::Storage::Files::DataLake::DataLakeFileClient CreateFileClient(optional_ptr<FileOpener> opener, const string &path,
 	                                                                     const AzureParsedUrl &parsed_url);
 
 	// From AzureFilesystem
