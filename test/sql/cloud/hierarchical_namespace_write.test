@@ -1,0 +1,38 @@
+# name: test/sql/hierarchical_namespace_write.test
+# description: test azure extension with ADLS GEN2 storage for writing files
+# group: [azure]
+
+# Require statement will ensure this test is run with this extension loaded
+require azure
+
+require parquet
+
+require-env AZURE_TENANT_ID
+
+require-env AZURE_CLIENT_ID
+
+require-env AZURE_CLIENT_SECRET
+
+require-env AZURE_STORAGE_ACCOUNT
+
+require-env DATA_DIRECTORY
+
+statement ok
+set allow_persistent_secrets=false
+
+statement ok
+CREATE SECRET spn (
+    TYPE AZURE,
+    PROVIDER SERVICE_PRINCIPAL,
+    TENANT_ID '${AZURE_TENANT_ID}',
+    CLIENT_ID '${AZURE_CLIENT_ID}',
+    CLIENT_SECRET '${AZURE_CLIENT_SECRET}',
+    ACCOUNT_NAME '${AZURE_STORAGE_ACCOUNT}'
+);
+
+statement ok
+COPY (
+    SELECT *
+    FROM '${DATA_DIRECTORY}/l.parquet'
+    WHERE l_shipmode = 'TRUCK'
+) TO 'abfss://output-private/writing_out/truck.parquet' (FORMAT PARQUET);

@@ -20,16 +20,19 @@ void AzureContextState::QueryEnd() {
 }
 
 AzureFileHandle::AzureFileHandle(AzureStorageFileSystem &fs, string path, FileOpenFlags flags,
-                                 const AzureReadOptions &read_options)
+                                 const AzureReadOptions &read_options, const AzureWriteOptions &write_options)
     : FileHandle(fs, std::move(path)), flags(flags),
       // File info
       length(0), last_modified(0),
       // Read info
       buffer_available(0), buffer_idx(0), file_offset(0), buffer_start(0), buffer_end(0),
       // Options
-      read_options(read_options) {
+      read_options(read_options), write_options(write_options) {
 	if (flags.OpenForReading()) {
 		read_buffer = duckdb::unique_ptr<data_t[]>(new data_t[read_options.buffer_size]);
+	}
+	if (flags.OpenForWriting()) {
+		write_buffer = duckdb::unique_ptr<data_t[]>(new data_t[write_options.block_size]);
 	}
 }
 
@@ -68,8 +71,12 @@ void AzureStorageFileSystem::LoadFileInfo(AzureFileHandle &handle) {
 	}
 }
 
-unique_ptr<FileHandle> AzureStorageFileSystem::OpenFile(const string &path, FileOpenFlags flags, optional_ptr<FileOpener> opener) {
+unique_ptr<FileHandle> AzureStorageFileSystem::OpenFile(const string &path, FileOpenFlags flags,
+                                                        optional_ptr<FileOpener> opener) {
 	D_ASSERT(flags.Compression() == FileCompressionType::UNCOMPRESSED);
+	if (!opener) {
+		throw InternalException("Cannot do Azure storage OpenFile without FileOpener");
+	}
 	auto handle = CreateHandle(path, flags, opener);
 	return std::move(handle);
 }

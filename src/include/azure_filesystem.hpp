@@ -2,8 +2,10 @@
 
 #include "azure_parsed_url.hpp"
 #include "duckdb/common/assert.hpp"
+#include "duckdb/common/exception.hpp"
 #include "duckdb/common/file_opener.hpp"
 #include "duckdb/common/file_system.hpp"
+#include "duckdb/common/typedefs.hpp"
 #include "duckdb/main/client_context_state.hpp"
 #include <azure/core/datetime.hpp>
 #include <azure/core/etag.hpp>
@@ -17,6 +19,10 @@ struct AzureReadOptions {
 	int32_t transfer_concurrency = 5;
 	int64_t transfer_chunk_size = 1 * 1024 * 1024;
 	idx_t buffer_size = 1 * 1024 * 1024;
+};
+
+struct AzureWriteOptions {
+	idx_t block_size;
 };
 
 class AzureContextState : public ClientContextState {
@@ -53,8 +59,15 @@ public:
 	void Close() override {
 	}
 
+	void AssertOpenForWriting() const {
+		if (!flags.OpenForWriting()) {
+			throw IOException("%s hasn't been open with any writing flags", path);
+		}
+	}
+
 protected:
-	AzureFileHandle(AzureStorageFileSystem &fs, string path, FileOpenFlags flags, const AzureReadOptions &read_options);
+	AzureFileHandle(AzureStorageFileSystem &fs, string path, FileOpenFlags flags, const AzureReadOptions &read_options,
+	                const AzureWriteOptions &write_options);
 
 public:
 	const FileOpenFlags flags;
@@ -66,14 +79,18 @@ public:
 	// Read buffer
 	duckdb::unique_ptr<data_t[]> read_buffer;
 
+	// Write buffer
+	duckdb::unique_ptr<data_t[]> write_buffer;
+
 	// Read info
-	idx_t buffer_available;
-	idx_t buffer_idx;
+	idx_t buffer_available; // TODO rename & check usage
+	idx_t buffer_idx; // TODO rename & check usage
 	idx_t file_offset;
 	idx_t buffer_start;
 	idx_t buffer_end;
 
 	const AzureReadOptions read_options;
+	const AzureWriteOptions write_options;
 };
 
 class AzureStorageFileSystem : public FileSystem {
@@ -97,6 +114,9 @@ public:
 	bool IsPipe(const string &filename, optional_ptr<FileOpener> opener = nullptr) override {
 		return false;
 	}
+	FileType GetFileType(FileHandle &handle) override {
+		return FileType::FILE_TYPE_REGULAR;
+	}
 	int64_t GetFileSize(FileHandle &handle) override;
 	time_t GetLastModifiedTime(FileHandle &handle) override;
 	void Seek(FileHandle &handle, idx_t location) override;
@@ -107,13 +127,14 @@ public:
 	virtual void CreateIfNotExists(AzureFileHandle &handle) = 0;
 
 protected:
-	virtual duckdb::unique_ptr<AzureFileHandle> CreateHandle(const string &path, FileOpenFlags flags, optional_ptr<FileOpener> opener) = 0;
+	virtual duckdb::unique_ptr<AzureFileHandle> CreateHandle(const string &path, FileOpenFlags flags,
+	                                                         optional_ptr<FileOpener> opener) = 0;
 	virtual void ReadRange(AzureFileHandle &handle, idx_t file_offset, char *buffer_out, idx_t buffer_out_len) = 0;
 
 	virtual const string &GetContextPrefix() const = 0;
 	std::shared_ptr<AzureContextState> GetOrCreateStorageContext(optional_ptr<FileOpener> opener, const string &path,
 	                                                             const AzureParsedUrl &parsed_url);
-	virtual std::shared_ptr<AzureContextState> CreateStorageContext(optional_ptr<FileOpener>opener, const string &path,
+	virtual std::shared_ptr<AzureContextState> CreateStorageContext(optional_ptr<FileOpener> opener, const string &path,
 	                                                                const AzureParsedUrl &parsed_url) = 0;
 
 	virtual void LoadRemoteFileInfo(AzureFileHandle &handle) = 0;

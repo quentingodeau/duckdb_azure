@@ -77,12 +77,6 @@ AzureBlobStorageFileHandle::AzureBlobStorageFileHandle(AzureBlobStorageFileSyste
 //////// AzureBlobStorageFileSystem ////////
 unique_ptr<AzureFileHandle> AzureBlobStorageFileSystem::CreateHandle(const string &path, FileOpenFlags flags,
                                                                      optional_ptr<FileOpener> opener) {
-	if (!opener) {
-		throw InternalException("Cannot do Azure storage CreateHandle without FileOpener");
-	}
-
-	D_ASSERT(flags.Compression() == FileCompressionType::UNCOMPRESSED);
-
 	auto parsed_url = ParseUrl(path);
 	auto storage_context = GetOrCreateStorageContext(opener, path, parsed_url);
 	auto container = storage_context->As<AzureBlobContextState>().GetBlobContainerClient(parsed_url.container);
@@ -98,8 +92,8 @@ bool AzureBlobStorageFileSystem::CanHandleFile(const string &fpath) {
 	return fpath.rfind(PATH_PREFIX, 0) * fpath.rfind(SHORT_PATH_PREFIX, 0) == 0;
 }
 
-vector<string> AzureBlobStorageFileSystem::Glob(const string &path, FileOpener* opener) {
-	if (opener == nullptr) {
+vector<string> AzureBlobStorageFileSystem::Glob(const string &path, FileOpener *opener) {
+	if (!opener) {
 		throw InternalException("Cannot do Azure storage Glob without FileOpener");
 	}
 
@@ -212,6 +206,10 @@ void AzureBlobStorageFileSystem::ReadRange(AzureFileHandle &handle, idx_t file_o
 }
 
 void AzureBlobStorageFileSystem::Write(FileHandle &handle, void *buffer, int64_t nr_bytes, idx_t location) {
+	auto &hfh = handle.Cast<AzureBlobStorageFileHandle>();
+	hfh.blob_client.AsBlockBlobClient();
+	//.StageBlock(const std::string &blockId, Azure::Core::IO::BodyStream &content); // TODO cache the client in the
+	//filehandler
 	// TODO implement!!
 }
 
@@ -221,10 +219,18 @@ void AzureBlobStorageFileSystem::FileSync(FileHandle &handle) {
 
 void AzureBlobStorageFileSystem::CreateOrOverwrite(AzureFileHandle &handle) {
 	// TODO implement!!
+	auto &hfh = handle.Cast<AzureBlobStorageFileHandle>();
+	hfh.AssertOpenForWriting();
+
+	hfh.blob_client.DeleteIfExists();
+	handle.length = 0;
+	handle.last_modified = 0;
 }
 
 void AzureBlobStorageFileSystem::CreateIfNotExists(AzureFileHandle &handle) {
+	handle.AssertOpenForWriting();
 	// TODO implement!!
+	// TODO get file info if exists
 }
 
 std::shared_ptr<AzureContextState> AzureBlobStorageFileSystem::CreateStorageContext(optional_ptr<FileOpener> opener,

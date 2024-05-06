@@ -96,12 +96,6 @@ AzureDfsStorageFileHandle::AzureDfsStorageFileHandle(AzureDfsStorageFileSystem &
 //////// AzureDfsStorageFileSystem ////////
 unique_ptr<AzureFileHandle> AzureDfsStorageFileSystem::CreateHandle(const string &path, FileOpenFlags flags,
                                                                     optional_ptr<FileOpener> opener) {
-	if (opener == nullptr) {
-		throw InternalException("Cannot do Azure storage CreateHandle without FileOpener");
-	}
-
-	D_ASSERT(flags.Compression() == FileCompressionType::UNCOMPRESSED);
-
 	auto parsed_url = ParseUrl(path);
 	auto storage_context = GetOrCreateStorageContext(opener, path, parsed_url);
 
@@ -112,7 +106,8 @@ unique_ptr<AzureFileHandle> AzureDfsStorageFileSystem::CreateHandle(const string
 }
 
 Azure::Storage::Files::DataLake::DataLakeFileClient
-AzureDfsStorageFileSystem::CreateFileClient(optional_ptr<FileOpener> opener, const string &path, const AzureParsedUrl &parsed_url) {
+AzureDfsStorageFileSystem::CreateFileClient(optional_ptr<FileOpener> opener, const string &path,
+                                            const AzureParsedUrl &parsed_url) {
 	auto storage_context = GetOrCreateStorageContext(opener, path, parsed_url);
 	auto file_system_client = storage_context->As<AzureDfsContextState>().GetDfsFileSystemClient(parsed_url.container);
 	return file_system_client.GetFileClient(parsed_url.path);
@@ -123,8 +118,8 @@ bool AzureDfsStorageFileSystem::CanHandleFile(const string &fpath) {
 }
 
 // Read operation
-vector<string> AzureDfsStorageFileSystem::Glob(const string &path, FileOpener* opener) {
-	if (opener == nullptr) {
+vector<string> AzureDfsStorageFileSystem::Glob(const string &path, FileOpener *opener) {
+	if (!opener) {
 		throw InternalException("Cannot do Azure storage Glob without FileOpener");
 	}
 
@@ -186,7 +181,7 @@ void AzureDfsStorageFileSystem::ReadRange(AzureFileHandle &handle, idx_t file_of
 	try {
 		// Specify the range
 		HttpRange range;
-		range.Offset = (int64_t)file_offset;
+		range.Offset = static_cast<int64_t>(file_offset);
 		range.Length = buffer_out_len;
 		DownloadFileToOptions options;
 		options.Range = range;
@@ -243,9 +238,7 @@ void AzureDfsStorageFileSystem::Write(FileHandle &handle, void *buffer, int64_t 
 	using Azure::Storage::Files::DataLake::AppendFileOptions;
 
 	auto &hfh = handle.Cast<AzureDfsStorageFileHandle>();
-	if (!hfh.flags.OpenForWriting()) {
-		throw InternalException("Write called on file not opened in write mode");
-	}
+	hfh.AssertOpenForWriting();
 
 	if (location != hfh.length) {
 		throw NotImplementedException("Non-sequential write not supported!");
@@ -268,9 +261,7 @@ void AzureDfsStorageFileSystem::CreateDirectory(const string &directory, optiona
 
 void AzureDfsStorageFileSystem::FileSync(FileHandle &handle) {
 	auto &hfh = handle.Cast<AzureDfsStorageFileHandle>();
-	if (!hfh.flags.OpenForWriting()) {
-		throw InternalException("Write called on file not opened in write mode");
-	}
+	hfh.AssertOpenForWriting();
 	auto response = hfh.file_client.Flush(hfh.length);
 	hfh.last_modified = ToTimeT(response.Value.LastModified);
 }
@@ -307,6 +298,7 @@ void AzureDfsStorageFileSystem::MoveFile(const string &source, const string &tar
 void AzureDfsStorageFileSystem::CreateOrOverwrite(AzureFileHandle &handle) {
 	using Azure::Storage::Files::DataLake::UploadFileFromOptions;
 	auto &hfh = handle.Cast<AzureDfsStorageFileHandle>();
+	hfh.AssertOpenForWriting();
 
 	hfh.file_client.DeleteIfExists();
 	auto response = hfh.file_client.Create();
@@ -316,8 +308,12 @@ void AzureDfsStorageFileSystem::CreateOrOverwrite(AzureFileHandle &handle) {
 }
 
 void AzureDfsStorageFileSystem::CreateIfNotExists(AzureFileHandle &handle) {
+	using Azure::Storage::Files::DataLake::CreateFileOptions;
 	auto &hfh = handle.Cast<AzureDfsStorageFileHandle>();
+	hfh.AssertOpenForWriting();
 
+	CreateFileOptions options;
+	// options.
 	auto response = hfh.file_client.CreateIfNotExists();
 
 	handle.length = response.Value.FileSize.ValueOr(0);

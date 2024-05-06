@@ -34,7 +34,7 @@ public:
 
 class AzureBlobStorageFileSystem : public AzureStorageFileSystem {
 public:
-	vector<string> Glob(const string &path, FileOpener* opener = nullptr) override;
+	vector<string> Glob(const string &path, FileOpener *opener = nullptr) override;
 
 	// FS methods
 	bool FileExists(const string &filename, optional_ptr<FileOpener> opener = nullptr) override;
@@ -63,7 +63,8 @@ protected:
 	}
 	std::shared_ptr<AzureContextState> CreateStorageContext(optional_ptr<FileOpener> opener, const string &path,
 	                                                        const AzureParsedUrl &parsed_url) override;
-	duckdb::unique_ptr<AzureFileHandle> CreateHandle(const string &path, FileOpenFlags flags, optional_ptr<FileOpener> opener) override;
+	duckdb::unique_ptr<AzureFileHandle> CreateHandle(const string &path, FileOpenFlags flags,
+	                                                 optional_ptr<FileOpener> opener) override;
 
 	// From AzureFilesystem
 	void LoadRemoteFileInfo(AzureFileHandle &handle) override;

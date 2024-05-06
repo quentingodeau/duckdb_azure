@@ -36,7 +36,7 @@ public:
 
 class AzureDfsStorageFileSystem : public AzureStorageFileSystem {
 public:
-	vector<string> Glob(const string &path, FileOpener* opener = nullptr) override;
+	vector<string> Glob(const string &path, FileOpener *opener = nullptr) override;
 
 	bool CanHandleFile(const string &fpath) override;
 	string GetName() const override {
@@ -67,9 +67,10 @@ protected:
 	}
 	std::shared_ptr<AzureContextState> CreateStorageContext(optional_ptr<FileOpener> opener, const string &path,
 	                                                        const AzureParsedUrl &parsed_url) override;
-	duckdb::unique_ptr<AzureFileHandle> CreateHandle(const string &path, FileOpenFlags flags, optional_ptr<FileOpener> opener) override;
-	Azure::Storage::Files::DataLake::DataLakeFileClient CreateFileClient(optional_ptr<FileOpener> opener, const string &path,
-	                                                                     const AzureParsedUrl &parsed_url);
+	duckdb::unique_ptr<AzureFileHandle> CreateHandle(const string &path, FileOpenFlags flags,
+	                                                 optional_ptr<FileOpener> opener) override;
+	Azure::Storage::Files::DataLake::DataLakeFileClient
+	CreateFileClient(optional_ptr<FileOpener> opener, const string &path, const AzureParsedUrl &parsed_url);
 
 	// From AzureFilesystem
 	void LoadRemoteFileInfo(AzureFileHandle &handle) override;

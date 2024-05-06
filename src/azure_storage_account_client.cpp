@@ -408,8 +408,9 @@ GetDfsStorageAccountClientFromServicePrincipalProvider(optional_ptr<FileOpener> 
 	return Azure::Storage::Files::DataLake::DataLakeServiceClient(account_url, token_credential, dfs_options);
 }
 
-static Azure::Storage::Blobs::BlobServiceClient
-GetBlobStorageAccountClient(optional_ptr<FileOpener> opener, const KeyValueSecret &secret, const AzureParsedUrl &azure_parsed_url) {
+static Azure::Storage::Blobs::BlobServiceClient GetBlobStorageAccountClient(optional_ptr<FileOpener> opener,
+                                                                            const KeyValueSecret &secret,
+                                                                            const AzureParsedUrl &azure_parsed_url) {
 	auto &provider = secret.GetProvider();
 	// default provider
 	if (provider == "config") {
@@ -424,7 +425,8 @@ GetBlobStorageAccountClient(optional_ptr<FileOpener> opener, const KeyValueSecre
 }
 
 static Azure::Storage::Files::DataLake::DataLakeServiceClient
-GetDfsStorageAccountClient(optional_ptr<FileOpener> opener, const KeyValueSecret &secret, const AzureParsedUrl &azure_parsed_url) {
+GetDfsStorageAccountClient(optional_ptr<FileOpener> opener, const KeyValueSecret &secret,
+                           const AzureParsedUrl &azure_parsed_url) {
 	auto &provider = secret.GetProvider();
 	// default provider
 	if (provider == "config") {
@@ -505,7 +507,8 @@ const SecretMatch LookupSecret(optional_ptr<FileOpener> opener, const std::strin
 	return {};
 }
 
-Azure::Storage::Blobs::BlobServiceClient ConnectToBlobStorageAccount(optional_ptr<FileOpener> opener, const std::string &path,
+Azure::Storage::Blobs::BlobServiceClient ConnectToBlobStorageAccount(optional_ptr<FileOpener> opener,
+                                                                     const std::string &path,
                                                                      const AzureParsedUrl &azure_parsed_url) {
 
 	auto secret_match = LookupSecret(opener, path);
@@ -519,7 +522,8 @@ Azure::Storage::Blobs::BlobServiceClient ConnectToBlobStorageAccount(optional_pt
 }
 
 Azure::Storage::Files::DataLake::DataLakeServiceClient
-ConnectToDfsStorageAccount(optional_ptr<FileOpener> opener, const std::string &path, const AzureParsedUrl &azure_parsed_url) {
+ConnectToDfsStorageAccount(optional_ptr<FileOpener> opener, const std::string &path,
+                           const AzureParsedUrl &azure_parsed_url) {
 	auto secret_match = LookupSecret(opener, path);
 	if (secret_match.HasMatch()) {
 		const auto &base_secret = secret_match.GetSecret();
