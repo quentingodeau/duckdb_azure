@@ -1,4 +1,5 @@
 #include "azure_dfs_filesystem.hpp"
+#include "azure_filesystem.hpp"
 #include "azure_parsed_url.hpp"
 #include "azure_storage_account_client.hpp"
 #include "duckdb/common/exception.hpp"
@@ -77,8 +78,9 @@ static void Walk(const Azure::Storage::Files::DataLake::DataLakeFileSystemClient
 
 //////// AzureDfsContextState ////////
 AzureDfsContextState::AzureDfsContextState(Azure::Storage::Files::DataLake::DataLakeServiceClient client,
-                                           const AzureReadOptions &azure_read_options)
-    : AzureContextState(azure_read_options), service_client(std::move(client)) {
+                                           const AzureReadOptions &azure_read_options,
+                                           const AzureWriteOptions &azure_write_options)
+    : AzureContextState(azure_read_options, azure_write_options), service_client(std::move(client)) {
 }
 
 Azure::Storage::Files::DataLake::DataLakeFileSystemClient
@@ -89,8 +91,9 @@ AzureDfsContextState::GetDfsFileSystemClient(const std::string &file_system_name
 //////// AzureDfsContextState ////////
 AzureDfsStorageFileHandle::AzureDfsStorageFileHandle(AzureDfsStorageFileSystem &fs, string path, FileOpenFlags flags,
                                                      const AzureReadOptions &read_options,
+                                                     const AzureWriteOptions &write_options,
                                                      Azure::Storage::Files::DataLake::DataLakeFileClient client)
-    : AzureFileHandle(fs, std::move(path), flags, read_options), file_client(std::move(client)) {
+    : AzureFileHandle(fs, std::move(path), flags, read_options, write_options), file_client(std::move(client)) {
 }
 
 //////// AzureDfsStorageFileSystem ////////
@@ -100,6 +103,7 @@ unique_ptr<AzureFileHandle> AzureDfsStorageFileSystem::CreateHandle(const string
 	auto storage_context = GetOrCreateStorageContext(opener, path, parsed_url);
 
 	auto handle = make_uniq<AzureDfsStorageFileHandle>(*this, path, flags, storage_context->read_options,
+	                                                   storage_context->write_options,
 	                                                   CreateFileClient(opener, path, parsed_url));
 	handle->PostConstruct();
 	return std::move(handle);
@@ -325,9 +329,10 @@ std::shared_ptr<AzureContextState> AzureDfsStorageFileSystem::CreateStorageConte
                                                                                    const string &path,
                                                                                    const AzureParsedUrl &parsed_url) {
 	auto azure_read_options = ParseAzureReadOptions(opener);
+	auto azure_write_options = AzureWriteOptions(); // TODO parse them!
 
 	return std::make_shared<AzureDfsContextState>(ConnectToDfsStorageAccount(opener, path, parsed_url),
-	                                              azure_read_options);
+	                                              azure_read_options, azure_write_options);
 }
 
 } // namespace duckdb

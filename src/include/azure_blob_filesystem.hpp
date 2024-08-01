@@ -12,7 +12,8 @@ namespace duckdb {
 
 class AzureBlobContextState : public AzureContextState {
 public:
-	AzureBlobContextState(Azure::Storage::Blobs::BlobServiceClient client, const AzureReadOptions &azure_read_options);
+	AzureBlobContextState(Azure::Storage::Blobs::BlobServiceClient client, const AzureReadOptions &azure_read_options,
+	                      const AzureWriteOptions &write_options);
 	Azure::Storage::Blobs::BlobContainerClient GetBlobContainerClient(const std::string &blobContainerName) const;
 	~AzureBlobContextState() override = default;
 
@@ -25,7 +26,8 @@ class AzureBlobStorageFileSystem;
 class AzureBlobStorageFileHandle : public AzureFileHandle {
 public:
 	AzureBlobStorageFileHandle(AzureBlobStorageFileSystem &fs, string path, FileOpenFlags flags,
-	                           const AzureReadOptions &read_options, Azure::Storage::Blobs::BlobClient blob_client);
+	                           const AzureReadOptions &read_options, const AzureWriteOptions &write_options,
+	                           Azure::Storage::Blobs::BlobClient blob_client);
 	~AzureBlobStorageFileHandle() override = default;
 
 public:

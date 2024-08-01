@@ -28,6 +28,7 @@ struct AzureWriteOptions {
 class AzureContextState : public ClientContextState {
 public:
 	const AzureReadOptions read_options;
+	const AzureWriteOptions write_options;
 
 public:
 	virtual bool IsValid() const;
@@ -45,7 +46,7 @@ public:
 	}
 
 protected:
-	AzureContextState(const AzureReadOptions &read_options);
+	AzureContextState(const AzureReadOptions &read_options, const AzureWriteOptions &write_options);
 
 protected:
 	bool is_valid;
@@ -84,7 +85,7 @@ public:
 
 	// Read info
 	idx_t buffer_available; // TODO rename & check usage
-	idx_t buffer_idx; // TODO rename & check usage
+	idx_t buffer_idx;       // TODO rename & check usage
 	idx_t file_offset;
 	idx_t buffer_start;
 	idx_t buffer_end;

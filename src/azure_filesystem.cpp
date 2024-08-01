@@ -7,8 +7,8 @@
 
 namespace duckdb {
 
-AzureContextState::AzureContextState(const AzureReadOptions &read_options)
-    : read_options(read_options), is_valid(true) {
+AzureContextState::AzureContextState(const AzureReadOptions &read_options, const AzureWriteOptions &write_options)
+    : read_options(read_options), write_options(write_options), is_valid(true) {
 }
 
 bool AzureContextState::IsValid() const {

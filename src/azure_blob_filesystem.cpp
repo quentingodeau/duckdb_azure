@@ -1,5 +1,6 @@
 #include "azure_blob_filesystem.hpp"
 
+#include "azure_filesystem.hpp"
 #include "azure_parsed_url.hpp"
 #include "azure_storage_account_client.hpp"
 #include "duckdb.hpp"
@@ -58,8 +59,9 @@ static bool Match(vector<string>::const_iterator key, vector<string>::const_iter
 
 //////// AzureBlobContextState ////////
 AzureBlobContextState::AzureBlobContextState(Azure::Storage::Blobs::BlobServiceClient client,
-                                             const AzureReadOptions &azure_read_options)
-    : AzureContextState(azure_read_options), service_client(std::move(client)) {
+                                             const AzureReadOptions &azure_read_options,
+                                             const AzureWriteOptions &azure_write_options)
+    : AzureContextState(azure_read_options, azure_write_options), service_client(std::move(client)) {
 }
 
 Azure::Storage::Blobs::BlobContainerClient
@@ -70,8 +72,9 @@ AzureBlobContextState::GetBlobContainerClient(const std::string &blobContainerNa
 //////// AzureBlobStorageFileHandle ////////
 AzureBlobStorageFileHandle::AzureBlobStorageFileHandle(AzureBlobStorageFileSystem &fs, string path, FileOpenFlags flags,
                                                        const AzureReadOptions &read_options,
+                                                       const AzureWriteOptions &write_options,
                                                        Azure::Storage::Blobs::BlobClient blob_client)
-    : AzureFileHandle(fs, std::move(path), flags, read_options), blob_client(std::move(blob_client)) {
+    : AzureFileHandle(fs, std::move(path), flags, read_options, write_options), blob_client(std::move(blob_client)) {
 }
 
 //////// AzureBlobStorageFileSystem ////////
@@ -82,7 +85,7 @@ unique_ptr<AzureFileHandle> AzureBlobStorageFileSystem::CreateHandle(const strin
 	auto container = storage_context->As<AzureBlobContextState>().GetBlobContainerClient(parsed_url.container);
 	auto blob_client = container.GetBlockBlobClient(parsed_url.path);
 
-	auto handle = make_uniq<AzureBlobStorageFileHandle>(*this, path, flags, storage_context->read_options,
+	auto handle = make_uniq<AzureBlobStorageFileHandle>(*this, path, flags, storage_context->read_options, storage_context->write_options, 
 	                                                    std::move(blob_client));
 	handle->PostConstruct();
 	return std::move(handle);
@@ -209,7 +212,7 @@ void AzureBlobStorageFileSystem::Write(FileHandle &handle, void *buffer, int64_t
 	auto &hfh = handle.Cast<AzureBlobStorageFileHandle>();
 	hfh.blob_client.AsBlockBlobClient();
 	//.StageBlock(const std::string &blockId, Azure::Core::IO::BodyStream &content); // TODO cache the client in the
-	//filehandler
+	// filehandler
 	// TODO implement!!
 }
 
@@ -237,9 +240,10 @@ std::shared_ptr<AzureContextState> AzureBlobStorageFileSystem::CreateStorageCont
                                                                                     const string &path,
                                                                                     const AzureParsedUrl &parsed_url) {
 	auto azure_read_options = ParseAzureReadOptions(opener);
+	auto azure_write_options = AzureWriteOptions(); // TODO parse them!
 
 	return std::make_shared<AzureBlobContextState>(ConnectToBlobStorageAccount(opener, path, parsed_url),
-	                                               azure_read_options);
+	                                               azure_read_options, azure_write_options);
 }
 
 } // namespace duckdb
