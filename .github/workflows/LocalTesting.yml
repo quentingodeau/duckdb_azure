@@ -11,45 +11,39 @@ jobs:
   azurite-tests-linux:
     name: Azurite tests (Linux)
     runs-on: ubuntu-latest
-    container: 'quay.io/pypa/manylinux2014_x86_64'
     env:
       VCPKG_TARGET_TRIPLET: 'x64-linux'
-      GEN: Ninja
+      GEN: ninja
       VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
       AZURE_STORAGE_CONNECTION_STRING: 'DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;QueueEndpoint=http://127.0.0.1:10001/devstoreaccount1;TableEndpoint=http://127.0.0.1:10002/devstoreaccount1;'
       AZURE_STORAGE_ACCOUNT: devstoreaccount1
       HTTP_PROXY_RUNNING: '1'
-      ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
       with:
         fetch-depth: 0
         submodules: 'true'
 
+    - uses: actions/setup-node@v4
+
     - name: install Azure test service
       run: |
-        yum install -y nodejs npm squid
+        sudo apt-get install -y azure-cli squid ninja-build
         npm install -g azurite
-        echo -e "[azure-cli]\nname=Azure CLI\nbaseurl=https://packages.microsoft.com/yumrepos/azure-cli\nenabled=1\ngpgcheck=1\ngpgkey=https://packages.microsoft.com/keys/microsoft.asc" | tee /etc/yum.repos.d/azure-cli.repo
-        yum install -y azure-cli
 
     - name: Launch & populate Azure test service
       run: |
         azurite > azurite_log.txt 2>&1 &
-        ./scripts/run_squid.sh --port 3128 --log_dir squid_logs &
-        ./scripts/run_squid.sh --port 3129 --log_dir squid_auth_logs --auth &
+        sudo ./scripts/run_squid.sh --port 3128 --log_dir squid_logs &
+        sudo ./scripts/run_squid.sh --port 3129 --log_dir squid_auth_logs --auth &
         sleep 10
         ./scripts/upload_test_files_to_azurite.sh
-
-    - name: Setup ManyLinux2014
-      run: |
-        ./duckdb/scripts/setup_manylinux2014.sh general aws-cli ccache ssh openssl python_alias
 
     - name: Setup vcpkg
       uses: lukka/run-vcpkg@v11.1
       with:
-        vcpkgGitCommitId: a1a1cbc975abf909a6c8985a6a2b8fe20bbd9bd6
+        vcpkgGitCommitId: 5e5d0e1cd7785623065e77eff011afdeec1a3574
 
     # Build extension
     - name: Build extension
@@ -75,10 +69,10 @@ jobs:
         cat azurite_log.txt
 
         echo "## squid"
-        cat squid_logs/*
+        sudo cat squid_logs/*
 
         echo "## squid auth"
-        cat squid_auth_logs/*
+        sudo cat squid_auth_logs/*
 
   azurite-tests-macos:
     name: Azurite tests (MacOS)
@@ -86,7 +80,7 @@ jobs:
     env:
       VCPKG_TARGET_TRIPLET: 'x64-osx'
       OSX_BUILD_ARCH: 'x86_64'
-      GEN: Ninja
+      GEN: ninja
       VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
       AZURE_STORAGE_CONNECTION_STRING: 'DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;QueueEndpoint=http://127.0.0.1:10001/devstoreaccount1;TableEndpoint=http://127.0.0.1:10002/devstoreaccount1;'
       AZURE_STORAGE_ACCOUNT: devstoreaccount1
@@ -113,7 +107,7 @@ jobs:
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
         with:
-          vcpkgGitCommitId: a1a1cbc975abf909a6c8985a6a2b8fe20bbd9bd6
+          vcpkgGitCommitId: 5e5d0e1cd7785623065e77eff011afdeec1a3574
 
       - name: Build extension
         shell: bash
@@ -150,7 +144,6 @@ jobs:
     runs-on: windows-latest
     env:
       VCPKG_TARGET_TRIPLET: 'x64-windows'
-      GEN: Ninja
       VCPKG_ROOT: ${{ github.workspace }}\vcpkg
       VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}\vcpkg\scripts\buildsystems\vcpkg.cmake
       AZURE_STORAGE_CONNECTION_STRING: 'DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;QueueEndpoint=http://127.0.0.1:10001/devstoreaccount1;TableEndpoint=http://127.0.0.1:10002/devstoreaccount1;'
@@ -165,7 +158,7 @@ jobs:
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
         with:
-          vcpkgGitCommitId: a1a1cbc975abf909a6c8985a6a2b8fe20bbd9bd6
+          vcpkgGitCommitId: 5e5d0e1cd7785623065e77eff011afdeec1a3574
 
       - uses: actions/setup-python@v2
         with:
